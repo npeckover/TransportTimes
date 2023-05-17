@@ -28,6 +28,23 @@ dat <- dat %>%
          Portable = ifelse(CCU == 1 | Non.CCU.Portable == 1, 1, 0)) %>%
   rename(Time.Between = Time.Last.Picture.and.Next.Exam.First.Picture)
 
+#### estimate lunch time based on time between ####
+summary_means <- dat %>%
+  summarise(tb_mean = mean(Time.Between, na.rm = T),
+            multi_port_mean = mean(Time.Between[More.Than.1.Portable == 1], na.rm = T),
+            one_port_mean = mean(Time.Between[More.Than.1.Portable == 0], na.rm = T),
+            tb_lunch_mean = mean(Time.Between[Lunch.Between == 1], na.rm = T),
+            tb_nolunch_mean = mean(Time.Between[Lunch.Between == 0], na.rm = T),
+            tb_lunch_med = median(Time.Between[Lunch.Between == 1], na.rm = T),
+            tb_nolunch_med = median(Time.Between[Lunch.Between == 0], na.rm = T))
+lunch_tmed <- as.numeric(summary_means[6] - summary_means[7])
+
+dat <- dat %>%
+  mutate(Time.Between.Lunch.Adjusted = ifelse(Lunch.Between == 1, Time.Between - lunch_tmed, Time.Between),
+         Reporting.Finding.Lunch.Adjusted = ifelse(Lunch.Between == 1, 
+                                                   ifelse(Reporting.Finding - lunch_tmed <= 0, 0, Reporting.Finding - lunch_tmed), 
+                                                   Reporting.Finding))
+
 #### ggplot stuff ####
 
 theme_np <- function() {
@@ -85,13 +102,16 @@ color_ramp <- colorRampPalette(c("#f4ba55", "#bc2354"))
 
 #### scan time by sonographer ####
 dat %>% ggplot() +
-  geom_boxplot(aes(y = Scan.Time, x = Tech)) +
+  geom_boxplot(aes(y = Scan.Time, x = Tech, fill = Tech)) +
   geom_boxplot(data = dat, aes(y = Scan.Time, x = ""), fill = "grey", alpha = 0.5) +
-  labs(title = "Boxplot of Scan Time by Tech",
+  labs(title = "Scanning Time by Tech",
        subtitle = "All exam types, with and without Definity",
        x = "Tech",
-       y = "Scan Time") +
-  scale_x_discrete(labels = c("Overall", sort(unique(dat$Tech))))
+       y = "Scan Time (minutes)") +
+  scale_x_discrete(labels = c("Overall", sort(unique(dat$Tech)))) +
+  scale_fill_manual(values = color_ramp(6)) +
+  guides(fill = "none") +
+  theme_np2()
 
 ## anova
 anova <- aov(Scan.Time ~ Tech, data = dat)
@@ -103,7 +123,7 @@ plot(posthoc)
 ## kruskal-wallis
 kruskal.test(Scan.Time ~ Tech, data = dat)
 # dunn's test
-dunn <- dunn.test(dat$Scan.Time, dat$Tech, method = "holm")
+dunn.test(dat$Scan.Time, dat$Tech, method = "holm")
 
 #### reporting and finding by sonographer ####
 dat %>% ggplot() +
@@ -116,14 +136,16 @@ dat %>% ggplot() +
   scale_x_discrete(labels = c("Overall", sort(unique(dat$Tech)))) + 
   scale_fill_manual(values = color_ramp(6)) +
   guides(fill = "none") +
-  theme_np()
+  theme_np2()
 
+## kruskal-wallis
+kruskal.test(Reporting.Finding.Lunch.Adjusted ~ Tech, data = dat)
 
 #### scan time by exam type ####
 dat %>% 
   ggplot() +
   geom_boxplot(aes(y = Scan.Time, x = Exam.Type, fill = Exam.Type)) +
-  labs(title = "Scanning Time",
+  labs(title = "Scanning Time by Exam Type",
        subtitle = "Definity doesn't add much time to a complete echo",
        x = "Exam Type", y = "Scan Time (minutes)") +
   scale_fill_manual(values = rev(color_ramp(6))) +
@@ -131,6 +153,8 @@ dat %>%
   theme_np2()
 
 kruskal.test(Scan.Time ~ Exam.Type, data = dat)
+dunn.test(dat$Scan.Time, dat$Exam.Type, method = "holm")
+
 
 #### exam length by exam type ####
 dat %>% ggplot() +
@@ -143,22 +167,6 @@ dat %>%
 
 kruskal.test(Scan.Time ~ Portable, data = dat)
 
-#### estimate lunch time based on time between ####
-summary_means <- dat %>%
-  summarise(tb_mean = mean(Time.Between, na.rm = T),
-            multi_port_mean = mean(Time.Between[More.Than.1.Portable == 1], na.rm = T),
-            one_port_mean = mean(Time.Between[More.Than.1.Portable == 0], na.rm = T),
-            tb_lunch_mean = mean(Time.Between[Lunch.Between == 1], na.rm = T),
-            tb_nolunch_mean = mean(Time.Between[Lunch.Between == 0], na.rm = T),
-            tb_lunch_med = median(Time.Between[Lunch.Between == 1], na.rm = T),
-            tb_nolunch_med = median(Time.Between[Lunch.Between == 0], na.rm = T))
-lunch_tmed <- as.numeric(summary_means[6] - summary_means[7])
-
-dat <- dat %>%
-  mutate(Time.Between.Lunch.Adjusted = ifelse(Lunch.Between == 1, Time.Between - lunch_tmed, Time.Between),
-         Reporting.Finding.Lunch.Adjusted = ifelse(Lunch.Between == 1, 
-                                                   ifelse(Reporting.Finding - lunch_tmed <= 0, 0, Reporting.Finding - lunch_tmed), 
-                                                   Reporting.Finding))
 #### time between, portable exams ####
 
 # multi port vs one port vs no port
@@ -256,6 +264,8 @@ quota_sum <- dat %>%
 summary(lm(Ratio ~ Avg.Time, quota_sum))
 
 table(quota_sum$Quota.Met, quota_sum$Transport)
+
+chisq.test(table(quota_sum$Quota.Met, quota_sum$Transport))
 
 quota_sum %>%
   ggplot(aes(y = Ratio, x = Avg.Time)) + 
